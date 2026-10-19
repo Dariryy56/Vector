@@ -20,9 +20,10 @@
 
 ## Установка и запуск
 
-- Клонируйте репозиторий и перейдите в папку проекта:
-git clone <URL-РЕПОЗИТОРИЯ>
-cd svg-composer
+git clone https://github.com/Dariryy56/Vector.git
+cd Vector
+npm ci
+npm run dev
 
 - Установите зависимости:
 npm ci
