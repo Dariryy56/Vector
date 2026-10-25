@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Icon } from './Icon.jsx';
+import { hasRoleVariant, resolveLibraryItem } from '../utils/library.js';
 
 function ArtworkPreview({ item }) {
+  if (!item?.viewBox) return null;
   const box = item.viewBox;
   return (
     <svg
@@ -15,11 +17,11 @@ function ArtworkPreview({ item }) {
   );
 }
 
-function ElementCard({ item, onAdd, onExtract, isCustom, selectedForDeletion, onToggleCustomSelection }) {
+function ElementCard({ item, onAdd, isCustom, selectedForDeletion, onToggleCustomSelection }) {
   return (
     <article className={`element-card${selectedForDeletion ? ' is-marked-for-deletion' : ''}`}>
       <button className="element-card-main" type="button" onClick={() => onAdd(item)} title={`Добавить «${item.name}» на холст`}>
-        <span className="element-image-wrap"><ArtworkPreview item={item} /></span>
+        <span className="element-image-wrap"><ArtworkPreview item={item} key={`${item.sourcePath || item.id}-${item.role || 'main'}`} /></span>
         <span className="element-name" title={item.name}>{item.name}</span>
         <span className="element-card-hint">Нажми, чтобы добавить</span>
       </button>
@@ -35,20 +37,26 @@ function ElementCard({ item, onAdd, onExtract, isCustom, selectedForDeletion, on
           {selectedForDeletion && <Icon name="check" size={13} />}
         </button>
       )}
-      <button
-        className="element-extract"
-        type="button"
-        title="Извлечь объект из SVG"
-        aria-label={`Извлечь объекты из ${item.name}`}
-        onClick={() => onExtract(item)}
-      >
-        <Icon name="scissors" size={14} />
-      </button>
     </article>
   );
 }
 
-function LayerRow({ object, item, selected, onSelect, onDuplicate, onDelete, onMove, onReorder }) {
+function LayerRow({
+  object,
+  item,
+  selected,
+  onSelect,
+  onDuplicate,
+  onDelete,
+  onMove,
+  onReorder,
+  onToggleLock,
+  onToggleRole,
+  canToggleRole,
+  illustrationSize,
+  palette,
+  canvasFormat,
+}) {
   const [dragging, setDragging] = useState(false);
   const handleDrop = (event) => {
     event.preventDefault();
@@ -56,10 +64,16 @@ function LayerRow({ object, item, selected, onSelect, onDuplicate, onDelete, onM
     setDragging(false);
     if (sourceId && sourceId !== object.id) onReorder(sourceId, object.id);
   };
+  const roleItem = resolveLibraryItem(item, illustrationSize, object.role || 'main', palette, canvasFormat);
+  const roleLabel = object.role === 'background' ? 'Фон' : 'Объект';
+  const nextRole = object.role === 'background' ? 'main' : 'background';
+  // Check the actual variant attached to this library item as well as the app-level guard.
+  // This keeps valid L/S role buttons available even when a previously resolved preview is passed in.
+  const roleSwitchAvailable = hasRoleVariant(item, illustrationSize, nextRole) || canToggleRole(object);
 
   return (
     <div
-      className={`layer-row${selected ? ' is-selected' : ''}${dragging ? ' is-dragging' : ''}`}
+      className={`layer-row${selected ? ' is-selected' : ''}${dragging ? ' is-dragging' : ''}${object.locked ? ' is-locked' : ''}`}
       draggable
       onDragStart={(event) => {
         event.dataTransfer.setData('text/plain', object.id);
@@ -70,9 +84,18 @@ function LayerRow({ object, item, selected, onSelect, onDuplicate, onDelete, onM
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
     >
+      <button
+        className={`layer-role-toggle${object.role === 'background' ? ' role-background' : ''}`}
+        type="button"
+        disabled={!roleSwitchAvailable}
+        title={roleSwitchAvailable ? 'Переключить состояние объекта' : `Для размера ${illustrationSize} нет подготовленного противоположного SVG-варианта`}
+        aria-label={`Текущее состояние: ${roleLabel}. Нажми, чтобы переключить.`}
+        onClick={() => onToggleRole(object.id)}
+      >{roleLabel}</button>
       <button className="layer-main" type="button" onClick={() => onSelect(object.id)}>
         <span className="layer-thumb">
-          {item && <ArtworkPreview item={item} />}
+          {roleItem && <ArtworkPreview item={roleItem} key={`${roleItem.sourcePath || roleItem.id}-${object.role || 'main'}-${illustrationSize}`} />}
+          {object.locked && <span className="layer-lock-badge"><Icon name="lock" size={10} /></span>}
         </span>
         <span className="layer-text">
           <span className="layer-name">{item?.name ?? 'Неизвестный элемент'}</span>
@@ -89,6 +112,16 @@ function LayerRow({ object, item, selected, onSelect, onDuplicate, onDelete, onM
         <button type="button" title="Дублировать слой" aria-label="Дублировать слой" onClick={() => onDuplicate(object.id)}>
           <Icon name="copy" size={14} />
         </button>
+        <button
+          type="button"
+          className={`layer-lock-action${object.locked ? ' locked' : ''}`}
+          title={object.locked ? 'Разблокировать положение' : 'Заблокировать положение'}
+          aria-label={object.locked ? 'Разблокировать положение' : 'Заблокировать положение'}
+          aria-pressed={Boolean(object.locked)}
+          onClick={() => onToggleLock(object.id)}
+        >
+          <Icon name={object.locked ? 'lock' : 'unlock'} size={14} />
+        </button>
         <button className="layer-delete" type="button" title="Удалить слой" aria-label="Удалить слой" onClick={() => onDelete(object.id)}>
           <Icon name="trash" size={14} />
         </button>
@@ -104,26 +137,37 @@ export function Sidebar({
   activeTab,
   onChangeTab,
   onAdd,
-  onExtract,
   onImport,
   onSelect,
   onDuplicate,
   onDelete,
   onMove,
   onReorder,
+  onToggleLock,
+  onToggleRole,
+  canToggleRole,
   selectedCustomIds,
   onToggleCustomSelection,
   onDeleteSelectedCustom,
   onDeleteAllCustom,
+  onCompose,
+  illustrationSize,
+  palette,
+  canvasFormat,
 }) {
   const [query, setQuery] = useState('');
+  const [metaphor, setMetaphor] = useState('');
+  const [componentNames, setComponentNames] = useState('');
   const itemById = useMemo(() => new Map(library.map((item) => [item.id, item])), [library]);
-  const customItemsCount = library.filter((item) => !item.builtin).length;
+  // Dedicated canvas backgrounds are selected in the right panel, not inserted as ordinary objects.
+  // Keep them in itemById so any existing background layer can still be rendered and managed.
+  const drawableLibrary = useMemo(() => library.filter((item) => item.kind !== 'canvas-background'), [library]);
+  const customItemsCount = drawableLibrary.filter((item) => !item.builtin).length;
   const filteredLibrary = useMemo(() => {
-    const normalized = query.trim().toLocaleLowerCase('ru');
-    if (!normalized) return library;
-    return library.filter((item) => `${item.name} ${item.sourceName}`.toLocaleLowerCase('ru').includes(normalized));
-  }, [library, query]);
+    const normalized = query.trim().toLocaleLowerCase('ru').replaceAll('ё', 'е');
+    if (!normalized) return drawableLibrary;
+    return drawableLibrary.filter((item) => `${item.name} ${item.sourceName}`.toLocaleLowerCase('ru').replaceAll('ё', 'е').includes(normalized));
+  }, [drawableLibrary, query]);
   const orderedObjects = [...objects].reverse();
 
   return (
@@ -168,6 +212,23 @@ export function Sidebar({
               <Icon name="upload" size={17} />
             </button>
           </div>
+
+          <section className="auto-build-panel" aria-labelledby="auto-build-title">
+            <div className="auto-build-heading">
+              <Icon name="sparkles" size={15} />
+              <h2 id="auto-build-title">Автосборка композиции</h2>
+            </div>
+            <form className="auto-build-row" onSubmit={(event) => { event.preventDefault(); onCompose('metaphor', metaphor); }}>
+              <input value={metaphor} onChange={(event) => setMetaphor(event.target.value)} placeholder="Метафора, например: учёба" aria-label="Метафора или заголовок" />
+              <button type="submit" title="Собрать по метафоре" aria-label="Собрать по метафоре"><Icon name="sparkles" size={15} /></button>
+            </form>
+            <form className="auto-build-row" onSubmit={(event) => { event.preventDefault(); onCompose('names', componentNames); }}>
+              <input value={componentNames} onChange={(event) => setComponentNames(event.target.value)} placeholder="Книга, Ручка, Телефон…" aria-label="Названия компонентов через запятую" />
+              <button type="submit" title="Собрать по названиям" aria-label="Собрать по названиям"><Icon name="plus" size={15} /></button>
+            </form>
+            
+          </section>
+
           <label className="search-field">
             <Icon name="search" size={16} />
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Найти элемент..." />
@@ -179,7 +240,7 @@ export function Sidebar({
                 <strong>Добавленные элементы</strong>
                 <span>{customItemsCount}</span>
               </div>
-              <p>Можно удалить свои SVG и извлечённые компоненты. Встроенные иллюстрации останутся.</p>
+              <p>Можно удалить свои импортированные SVG. Встроенные иллюстрации останутся.</p>
               <div className="library-manage-actions">
                 <button className="button-secondary library-delete-selected" type="button" disabled={selectedCustomIds.size === 0} onClick={onDeleteSelectedCustom}>
                   <Icon name="trash" size={13} /> Удалить выбранные ({selectedCustomIds.size})
@@ -192,7 +253,6 @@ export function Sidebar({
           )}
           <div className="elements-caption">
             <span>{filteredLibrary.length} {filteredLibrary.length === 1 ? 'элемент' : 'элементов'}</span>
-            <span className="caption-tip"><Icon name="scissors" size={12} /> — извлечь части SVG</span>
           </div>
           {filteredLibrary.length > 0 ? (
             <div className="elements-grid">
@@ -201,7 +261,6 @@ export function Sidebar({
                   key={item.id}
                   item={item}
                   onAdd={onAdd}
-                  onExtract={onExtract}
                   isCustom={!item.builtin}
                   selectedForDeletion={selectedCustomIds.has(item.id)}
                   onToggleCustomSelection={onToggleCustomSelection}
@@ -239,6 +298,12 @@ export function Sidebar({
                   onDelete={onDelete}
                   onMove={onMove}
                   onReorder={onReorder}
+                  onToggleLock={onToggleLock}
+                  onToggleRole={onToggleRole}
+                  canToggleRole={canToggleRole}
+                  illustrationSize={illustrationSize}
+                  palette={palette}
+                  canvasFormat={canvasFormat}
                 />
               ))}
             </div>
@@ -250,12 +315,8 @@ export function Sidebar({
               <button className="button-secondary" type="button" onClick={() => onChangeTab('elements')}><Icon name="grid" size={15} /> Открыть элементы</button>
             </div>
           )}
-          {objects.length > 0 && (
-            <div className="layers-footer"><span className="footer-dot" /> Верхний элемент списка находится на переднем плане.</div>
-          )}
         </div>
       )}
-
     </aside>
   );
 }

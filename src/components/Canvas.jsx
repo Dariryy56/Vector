@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon.jsx';
+import { resolveLibraryItem } from '../utils/library.js';
+import { namespaceSvgIds } from '../utils/svg.js';
 
-const CANVAS_WIDTH = 1920;
-const CANVAS_HEIGHT = 1048;
 const MIN_ZOOM = 0.12;
 const MAX_ZOOM = 1.4;
 
@@ -27,17 +27,20 @@ function getStagePoint(event, svg, zoom) {
 }
 
 function Artwork({ object, item, selected, onPointerDown }) {
+  const namespacedContent = useMemo(() => item ? namespaceSvgIds(item.content, object.id) : '', [item, object.id]);
   if (!item) return null;
   const box = item.viewBox;
   const centerX = object.width / 2;
   const centerY = object.height / 2;
+  const isLocked = Boolean(object.locked);
 
   return (
     <g
       transform={`translate(${object.x} ${object.y}) rotate(${object.rotation} ${centerX} ${centerY})`}
       onPointerDown={(event) => onPointerDown(event, object, 'move')}
-      className={`canvas-object${selected ? ' canvas-object-selected' : ''}`}
+      className={`canvas-object${selected ? ' canvas-object-selected' : ''}${isLocked ? ' canvas-object-locked' : ''}`}
       data-object-id={object.id}
+      data-object-role={object.role || 'main'}
     >
       <svg
         x="0"
@@ -47,7 +50,7 @@ function Artwork({ object, item, selected, onPointerDown }) {
         viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
         preserveAspectRatio="xMidYMid meet"
         overflow="visible"
-        dangerouslySetInnerHTML={{ __html: item.content }}
+        dangerouslySetInnerHTML={{ __html: namespacedContent }}
       />
     </g>
   );
@@ -55,17 +58,31 @@ function Artwork({ object, item, selected, onPointerDown }) {
 
 function SelectionControls({ object, onPointerDown }) {
   const { x, y, width, height, rotation } = object;
-  const handles = [
-    { x, y, type: 'resize', cursor: 'nwse-resize' },
-    { x: x + width, y, type: 'resize', cursor: 'nesw-resize' },
-    { x, y: y + height, type: 'resize', cursor: 'nesw-resize' },
-    { x: x + width, y: y + height, type: 'resize', cursor: 'nwse-resize' },
-  ];
   const centerX = width / 2;
   const rotateY = -32;
+  const transform = `translate(${x} ${y}) rotate(${rotation} ${centerX} ${height / 2})`;
+
+  if (object.locked) {
+    return (
+      <g transform={transform} className="selection-controls selection-controls-locked">
+        <rect className="selection-outline" x="0" y="0" width={width} height={height} rx="2" />
+        <g transform={`translate(${Math.max(8, width - 15)} 6)`} className="canvas-lock-indicator">
+          <rect x="-8" y="0" width="16" height="13" rx="3" />
+          <path d="M-5 0v-3a5 5 0 0 1 10 0v3" />
+        </g>
+      </g>
+    );
+  }
+
+  const handles = [
+    { x: 0, y: 0, cursor: 'nwse-resize' },
+    { x: width, y: 0, cursor: 'nesw-resize' },
+    { x: 0, y: height, cursor: 'nesw-resize' },
+    { x: width, y: height, cursor: 'nwse-resize' },
+  ];
 
   return (
-    <g transform={`translate(${x} ${y}) rotate(${rotation} ${centerX} ${height / 2})`} className="selection-controls">
+    <g transform={transform} className="selection-controls">
       <rect className="selection-outline" x="0" y="0" width={width} height={height} rx="2" />
       <path className="rotate-stem" d={`M ${centerX} 0 V ${rotateY + 5}`} />
       <circle
@@ -79,8 +96,8 @@ function SelectionControls({ object, onPointerDown }) {
         <rect
           key={index}
           className="resize-handle"
-          x={handle.x - x - 5}
-          y={handle.y - y - 5}
+          x={handle.x - 5}
+          y={handle.y - 5}
           width="10"
           height="10"
           rx="2"
@@ -92,7 +109,22 @@ function SelectionControls({ object, onPointerDown }) {
   );
 }
 
-export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject }) {
+export function Canvas({
+  library,
+  objects,
+  selectedId,
+  onSelect,
+  onUpdateObject,
+  illustrationSize,
+  canvasFormat,
+  canvasWidth,
+  canvasHeight,
+  palette,
+  canvasBackground = 'plain',
+  onChangeIllustrationSize,
+  compositionName = 'Новая композиция',
+  onCompositionNameChange,
+}) {
   const viewportRef = useRef(null);
   const svgRef = useRef(null);
   const gestureRef = useRef(null);
@@ -101,18 +133,36 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
   const [zoom, setZoom] = useState(0.5);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
-  const itemById = new Map(library.map((item) => [item.id, item]));
   const selectedObject = objects.find((object) => object.id === selectedId);
+
+  const itemById = useMemo(() => {
+    const result = new Map();
+    library.forEach((item) => {
+      result.set(item.id, {
+        main: resolveLibraryItem(item, illustrationSize, 'main', palette, canvasFormat),
+        background: resolveLibraryItem(item, illustrationSize, 'background', palette, canvasFormat),
+      });
+    });
+    return result;
+  }, [library, illustrationSize, palette, canvasFormat]);
+  const canvasBackgroundItem = useMemo(() => {
+    if (canvasBackground === 'plain') return null;
+    const source = library.find((item) => item.id === `builtin:canvas-background:${canvasBackground}`);
+    return resolveLibraryItem(source, illustrationSize, 'background', palette, canvasFormat);
+  }, [library, canvasBackground, illustrationSize, palette, canvasFormat]);
+  const canvasBackgroundContent = useMemo(() => canvasBackgroundItem
+    ? namespaceSvgIds(canvasBackgroundItem.content, `artboard-${canvasFormat}-${canvasBackground}`)
+    : '', [canvasBackgroundItem, canvasFormat, canvasBackground]);
 
   const fitToView = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
-    const nextZoom = clamp(Math.min((rect.width - 84) / CANVAS_WIDTH, (rect.height - 84) / CANVAS_HEIGHT), MIN_ZOOM, 0.9);
+    const nextZoom = clamp(Math.min((rect.width - 84) / canvasWidth, (rect.height - 84) / canvasHeight), MIN_ZOOM, 0.9);
     setZoom(nextZoom);
     setPan({ x: 0, y: 0 });
     zoomTouchedRef.current = true;
-  }, []);
+  }, [canvasWidth, canvasHeight]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -120,16 +170,20 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
     const resizeObserver = new ResizeObserver(() => {
       if (!zoomTouchedRef.current) {
         const rect = viewport.getBoundingClientRect();
-        setZoom(clamp(Math.min((rect.width - 84) / CANVAS_WIDTH, (rect.height - 84) / CANVAS_HEIGHT), MIN_ZOOM, 0.9));
+        setZoom(clamp(Math.min((rect.width - 84) / canvasWidth, (rect.height - 84) / canvasHeight), MIN_ZOOM, 0.9));
       }
     });
     resizeObserver.observe(viewport);
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [canvasWidth, canvasHeight]);
+
+  useEffect(() => {
+    fitToView();
+  }, [canvasWidth, canvasHeight, fitToView]);
 
   useEffect(() => {
     const onKeyDown = (event) => {
-      if (event.code === 'Space' && !event.repeat && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+      if (event.code === 'Space' && !event.repeat && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
         spacePressedRef.current = true;
       }
     };
@@ -156,9 +210,12 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
   const startGesture = (event, object, type) => {
     event.preventDefault();
     event.stopPropagation();
-    const svg = svgRef.current;
-    const point = getStagePoint(event, svg, zoom);
     onSelect(object.id);
+    if (object.locked) return;
+
+    const svg = svgRef.current;
+    if (!svg) return;
+    const point = getStagePoint(event, svg, zoom);
     const center = { x: object.x + object.width / 2, y: object.y + object.height / 2 };
     gestureRef.current = {
       type,
@@ -192,7 +249,7 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
         startPan: pan,
       };
       setIsPanning(true);
-      svgRef.current.setPointerCapture(event.pointerId);
+      svgRef.current?.setPointerCapture(event.pointerId);
       return;
     }
     onSelect(null);
@@ -211,7 +268,7 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
     }
 
     const object = objects.find((entry) => entry.id === gesture.id);
-    if (!object) return;
+    if (!object || object.locked) return;
     const dx = (event.clientX - gesture.clientX) / gesture.zoom;
     const dy = (event.clientY - gesture.clientY) / gesture.zoom;
 
@@ -222,10 +279,12 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
       if (gesture.type === 'resize') {
         const currentDistance = distance(point, gesture.center);
         const ratio = currentDistance / Math.max(gesture.startDistance, 1);
-        const scale = clamp(ratio, 0.12, 6);
+        const minimumScale = Math.max(32 / gesture.startWidth, 32 / gesture.startHeight);
+        const maximumScale = Math.min(1700 / gesture.startWidth, 980 / gesture.startHeight);
+        const scale = clamp(ratio, minimumScale, maximumScale);
         onUpdateObject(gesture.id, {
-          width: clamp(gesture.startWidth * scale, 32, 1700),
-          height: clamp(gesture.startHeight * scale, 32, 980),
+          width: gesture.startWidth * scale,
+          height: gesture.startHeight * scale,
         });
       } else if (gesture.type === 'rotate') {
         const angle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) * 180 / Math.PI;
@@ -243,11 +302,42 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
     }
   };
 
+  const currentSizeLabel = `${canvasWidth} × ${canvasHeight}`;
+
   return (
     <section className="workspace" aria-label="Рабочий холст">
       <div className="workspace-topline">
-        <div className="breadcrumb"><span>Проект</span><span className="breadcrumb-separator">/</span><strong>Новая композиция</strong><span className="unsaved-dot" title="Локальный проект" /></div>
-        <div className="canvas-size-label"><span className="status-dot" /> </div>
+        <div className="breadcrumb">
+          <span>Проект</span>
+          <span className="breadcrumb-separator">/</span>
+          <input
+            className="composition-name-input"
+            type="text"
+            value={compositionName}
+            onChange={(event) => onCompositionNameChange?.(event.target.value)}
+            placeholder="Новая композиция"
+            maxLength={80}
+            aria-label="Название композиции"
+            title="Нажми и введи название композиции"
+          />
+          <span className="unsaved-dot" title="Название сохраняется в этом браузере" />
+        </div>
+        <div className="canvas-top-actions">
+          <div className="illustration-size-control" role="group" aria-label="Детализация иллюстраций">
+            <span>Детали</span>
+            {['L', 'S'].map((size) => (
+              <button
+                key={size}
+                type="button"
+                className={illustrationSize === size ? 'active' : ''}
+                aria-pressed={illustrationSize === size}
+                title={`Использовать SVG-варианты ${size}`}
+                onClick={() => onChangeIllustrationSize(size)}
+              >{size}</button>
+            ))}
+          </div>
+          <div className="canvas-size-label"><span className="status-dot" />{currentSizeLabel}</div>
+        </div>
       </div>
 
       <div
@@ -258,35 +348,59 @@ export function Canvas({ library, objects, selectedId, onSelect, onUpdateObject 
         <div className="canvas-backdrop-glow" />
         <div
           className="artboard"
-          style={{ transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
+          style={{ width: canvasWidth, height: canvasHeight, transform: `translate(-50%, -50%) translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}
         >
           <svg
             ref={svgRef}
             className="composition-svg"
-            width={CANVAS_WIDTH}
-            height={CANVAS_HEIGHT}
-            viewBox={`0 0 ${CANVAS_WIDTH} ${CANVAS_HEIGHT}`}
+            width={canvasWidth}
+            height={canvasHeight}
+            viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
             onPointerDown={onCanvasPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             aria-label="Редактируемый SVG-холст"
           >
-            <rect className="artboard-background" width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
-            {objects.map((object) => (
-              <Artwork
-                key={object.id}
-                object={object}
-                item={itemById.get(object.libraryId)}
-                selected={object.id === selectedId}
-                onPointerDown={startGesture}
+            <rect
+              className="artboard-background"
+              width={canvasWidth}
+              height={canvasHeight}
+              style={{ fill: palette?.colors?.background?.background1 || '#D7CDF5' }}
+            />
+            {canvasBackgroundItem?.viewBox && (
+              <svg
+                key={`${canvasBackground}-${canvasFormat}-${palette?.id || 'palette'}`}
+                className="canvas-template-background"
+                x="0"
+                y="0"
+                width={canvasWidth}
+                height={canvasHeight}
+                viewBox={`${canvasBackgroundItem.viewBox.x} ${canvasBackgroundItem.viewBox.y} ${canvasBackgroundItem.viewBox.width} ${canvasBackgroundItem.viewBox.height}`}
+                preserveAspectRatio="xMidYMid meet"
+                pointerEvents="none"
+                aria-hidden="true"
+                dangerouslySetInnerHTML={{ __html: canvasBackgroundContent }}
               />
-            ))}
+            )}
+            {objects.map((object) => {
+              const variants = itemById.get(object.libraryId);
+              const item = variants?.[object.role || 'main'];
+              return (
+                <Artwork
+                  key={`${object.id}-${illustrationSize}-${object.role || 'main'}-${item?.sourcePath || ''}`}
+                  object={object}
+                  item={item}
+                  selected={object.id === selectedId}
+                  onPointerDown={startGesture}
+                />
+              );
+            })}
             {selectedObject && itemById.has(selectedObject.libraryId) && (
               <SelectionControls object={selectedObject} onPointerDown={startGesture} />
             )}
           </svg>
-          <div className="artboard-dimension"><span />1920 × 1048</div>
+          <div className="artboard-dimension"><span />{currentSizeLabel}</div>
         </div>
 
         {objects.length === 0 && (

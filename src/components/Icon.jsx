@@ -12,7 +12,6 @@ const icons = {
   upload: <><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 16v4h16v-4"/></>,
   plus: <><path d="M12 5v14M5 12h14"/></>,
   search: <><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.2 4.2"/></>,
-  scissors: <><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><path d="m8 7.5 12 9M8 16.5l12-9"/><path d="m14 12 6 8"/></>,
   'arrow-up': <><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></>,
   'arrow-down': <><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></>,
   trash: <><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="m6 7 1 13h10l1-13"/><path d="M9 7V4h6v3"/></>,
@@ -33,6 +32,11 @@ const icons = {
   image: <><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></>,
   layersPlus: <><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 16 9 5 9-5"/><path d="M19 3v6M16 6h6"/></>,
   arrowUpRight: <><path d="M7 17 17 7M7 7h10v10"/></>,
+  lock: <><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></>,
+  unlock: <><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.7-1.5"/></>,
+  square: <><rect x="4" y="4" width="16" height="16" rx="1.5"/></>,
+  'rectangle-vertical': <><rect x="6" y="2" width="12" height="20" rx="1.5"/></>,
+  'rectangle-horizontal': <><rect x="2" y="6" width="20" height="12" rx="1.5"/></>,
 };
 
 export function Icon({ name, size = 18, strokeWidth }) {

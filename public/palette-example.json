@@ -1,0 +1,19 @@
+{
+  "id": "palette-import-test-coral-2026",
+  "name": "Коралловая",
+  "version": 1,
+  "colors": {
+    "objects": {
+      "object1": "#FF6B6B",
+      "object2": "#FFD166",
+      "object3": "#06D6A0",
+      "object4": "#FFFFFF"
+    },
+    "background": {
+      "background1": "#CDE7F0",
+      "background2": "#5BC0BE",
+      "background3": "#5a81b1",
+      "background4": "#181817"
+    }
+  }
+}
